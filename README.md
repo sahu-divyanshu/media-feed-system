@@ -1,34 +1,35 @@
-# Media Feed System
+# Media Feed System: High-Throughput State Management
 
-This repository implements a decoupled media upload and asynchronous processing pipeline. It demonstrates high-performance system design patterns by offloading binary storage to an external object store and delegating heavy compute tasks to background workers.
+This repository contains a decoupled media upload pipeline and a real-time state management service. It is engineered to bypass standard relational database bottlenecks during high-frequency read/write operations and binary file storage.
 
-## Architecture
+## Architectural Architecture
 
-The system consists of the following isolated components:
+This system eliminates two primary scaling failures found in naive backend designs:
+1. **The Upload Bottleneck:** Routing binary file uploads through an API server blocks worker threads and consumes excessive bandwidth. Solved via S3 Presigned URLs.
+2. **The Unread Indicator Bottleneck:** Executing relational `COUNT()` queries for unread messages on every client poll exhausts database CPU. Solved via in-memory Redis Set deduplication.
 
-1. **Client**: Requests upload authorization, uploads binaries directly to storage, and notifies the backend upon completion.
-2. **FastAPI Backend**: Handles authorization, metadata persistence, and job enqueuing. It does not process or route binary files.
-3. **MinIO (S3 Compatible)**: Handles direct binary ingestion via cryptographically signed URLs.
-4. **PostgreSQL**: Stores relational metadata for user posts.
-5. **Valkey (Redis)**: Acts as the message broker for background jobs and the high-speed data store for O(1) deduplication algorithms.
-6. **Python Worker**: A standalone process that consumes the Valkey queue, extracts hashtag metadata via regex, and updates trending metrics.
+## Technology Stack
 
-## System Flow
+* **Compute:** FastAPI (Python)
+* **Primary Database:** PostgreSQL
+* **In-Memory Datastore & Queue:** Valkey (Redis)
+* **Object Storage:** MinIO (S3 Compatible)
+* **Containerization:** Docker
 
-1. **Upload Authorization**: The client requests a Presigned URL from the FastAPI server.
-2. **Direct Ingestion**: The client executes an HTTP PUT directly to MinIO using the Presigned URL. The FastAPI server remains idle.
-3. **Metadata Commit**: The client notifies the FastAPI server. The server writes post metadata to PostgreSQL.
-4. **Asynchronous Handover**: The server pushes the job payload to a Valkey list and immediately returns a 202 Accepted response to the client.
-5. **Background Processing**: The worker process blocks on the Valkey queue (BLPOP). Upon receiving a payload, it extracts hashtags and updates a Valkey Sorted Set using pipelined ZINCRBY commands.
-6. **O(1) Unread Indicator**: Unread messages are tracked using Redis Sets (SADD). This provides native deduplication. Retrieving the unread count uses SCARD, an O(1) metadata read.
+## Core System Flows
 
-## Prerequisites
+### 1. Decoupled Media Upload
+* **URL Request:** Client requests an upload token. FastAPI returns a time-bound MinIO Presigned URL.
+* **Direct Upload:** Client executes an HTTP PUT directly to the MinIO bucket. The API processes zero bytes of the media payload.
+* **Async Processing:** Client confirms the upload. FastAPI commits metadata to PostgreSQL and pushes the event to a Valkey message queue for asynchronous hashtag extraction.
 
-* Docker and Docker Compose
-* Python 3.13
+### 2. Real-Time State Management (Unread Indicators)
+* **Ingestion (SADD):** When a message is sent, the Sender ID is pushed to a recipient-specific Valkey Set (`unread:{user_id}`). Valkey natively deduplicates the entries in memory.
+* **Retrieval (SCARD):** The client polls for unread counts. The API returns the integer length of the Valkey Set in O(1) time, completely bypassing PostgreSQL.
+* **State Reset (DEL):** When the user opens their inbox, the API deletes the Valkey Set, instantly resetting the unread state.
 
-## Setup and Execution
+## Local Execution
 
-1. **Start Infrastructure**:
-   ```bash
-   docker compose up -d
+1. Boot the infrastructure (PostgreSQL, Valkey, MinIO):
+```bash
+docker-compose up -d
