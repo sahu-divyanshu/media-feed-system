@@ -1,0 +1,13 @@
+services:
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: unread_valkey
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    command: valkey-server --loglevel notice
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10

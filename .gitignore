@@ -1,0 +1,12 @@
+# Python virtual environment
+.venv/
+__pycache__/
+*.py[cod]
+
+# Local data (Docker volumes)
+postgres_data/
+minio_data/
+
+# Environment and Logs
+.env
+*.log
